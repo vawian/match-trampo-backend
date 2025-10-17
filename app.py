@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
-from models import db, Professional, Subscription, Schedule
+from models import db, Professional, Subscription, Schedule, Chat, Message, ProfessionalMetrics
 from math import radians, sin, cos, sqrt, atan2
 
 app = Flask(__name__)
@@ -76,6 +76,325 @@ def search_professionals():
 @app.route("/api/status", methods=["GET"])
 def status():
     return jsonify({"status": "ok", "service": "Match Trampo Backend API"})
+
+# ==================== ENDPOINTS DE CHAT ====================
+
+@app.route("/api/chats", methods=["GET"])
+def get_chats():
+    """Retorna todos os chats de um usuário (cliente ou profissional)"""
+    user_id = request.args.get("user_id")
+    user_type = request.args.get("user_type")  # 'client' ou 'professional'
+    
+    if not user_id or not user_type:
+        return jsonify({"status": "error", "message": "user_id e user_type são obrigatórios."}), 400
+    
+    if user_type == "client":
+        chats = Chat.query.filter_by(client_id=user_id).order_by(Chat.last_message_at.desc()).all()
+    elif user_type == "professional":
+        chats = Chat.query.filter_by(professional_id=user_id).order_by(Chat.last_message_at.desc()).all()
+    else:
+        return jsonify({"status": "error", "message": "user_type deve ser 'client' ou 'professional'."}), 400
+    
+    result = []
+    for chat in chats:
+        last_message = chat.messages.order_by(Message.sent_at.desc()).first()
+        unread_count = chat.messages.filter_by(is_read=False).filter(Message.sender_id != user_id).count()
+        
+        result.append({
+            "id": chat.id,
+            "client_id": chat.client_id,
+            "professional_id": chat.professional_id,
+            "professional_name": chat.professional.name,
+            "professional_profession": chat.professional.profession,
+            "last_message": last_message.content if last_message else None,
+            "last_message_at": last_message.sent_at.isoformat() if last_message else chat.created_at.isoformat(),
+            "unread_count": unread_count
+        })
+    
+    return jsonify({"status": "success", "chats": result})
+
+@app.route("/api/chats/<int:chat_id>/messages", methods=["GET"])
+def get_messages(chat_id):
+    """Retorna todas as mensagens de um chat específico"""
+    chat = Chat.query.get(chat_id)
+    
+    if not chat:
+        return jsonify({"status": "error", "message": "Chat não encontrado."}), 404
+    
+    messages = chat.messages.all()
+    
+    result = []
+    for msg in messages:
+        result.append({
+            "id": msg.id,
+            "sender_id": msg.sender_id,
+            "sender_type": msg.sender_type,
+            "content": msg.content,
+            "sent_at": msg.sent_at.isoformat(),
+            "is_read": msg.is_read
+        })
+    
+    return jsonify({"status": "success", "messages": result})
+
+@app.route("/api/chats", methods=["POST"])
+def create_or_get_chat():
+    """Cria um novo chat ou retorna um existente entre cliente e profissional"""
+    data = request.get_json()
+    client_id = data.get("client_id")
+    professional_id = data.get("professional_id")
+    
+    if not client_id or not professional_id:
+        return jsonify({"status": "error", "message": "client_id e professional_id são obrigatórios."}), 400
+    
+    # Verifica se já existe um chat entre esses usuários
+    existing_chat = Chat.query.filter_by(client_id=client_id, professional_id=professional_id).first()
+    
+    if existing_chat:
+        return jsonify({"status": "success", "chat_id": existing_chat.id, "created": False})
+    
+    # Cria um novo chat
+    new_chat = Chat(client_id=client_id, professional_id=professional_id)
+    db.session.add(new_chat)
+    db.session.commit()
+    
+    return jsonify({"status": "success", "chat_id": new_chat.id, "created": True}), 201
+
+@app.route("/api/chats/<int:chat_id>/messages", methods=["POST"])
+def send_message(chat_id):
+    """Envia uma nova mensagem em um chat"""
+    chat = Chat.query.get(chat_id)
+    
+    if not chat:
+        return jsonify({"status": "error", "message": "Chat não encontrado."}), 404
+    
+    data = request.get_json()
+    sender_id = data.get("sender_id")
+    sender_type = data.get("sender_type")  # 'client' ou 'professional'
+    content = data.get("content")
+    
+    if not sender_id or not sender_type or not content:
+        return jsonify({"status": "error", "message": "sender_id, sender_type e content são obrigatórios."}), 400
+    
+    if sender_type not in ["client", "professional"]:
+        return jsonify({"status": "error", "message": "sender_type deve ser 'client' ou 'professional'."}), 400
+    
+    # Cria a nova mensagem
+    new_message = Message(
+        chat_id=chat_id,
+        sender_id=sender_id,
+        sender_type=sender_type,
+        content=content
+    )
+    
+    # Atualiza o timestamp do último mensagem no chat
+    chat.last_message_at = datetime.utcnow()
+    
+    db.session.add(new_message)
+    db.session.commit()
+    
+    return jsonify({
+        "status": "success",
+        "message": {
+            "id": new_message.id,
+            "sender_id": new_message.sender_id,
+            "sender_type": new_message.sender_type,
+            "content": new_message.content,
+            "sent_at": new_message.sent_at.isoformat(),
+            "is_read": new_message.is_read
+        }
+    }), 201
+
+@app.route("/api/chats/<int:chat_id>/messages/<int:message_id>/read", methods=["PUT"])
+def mark_message_as_read(chat_id, message_id):
+    """Marca uma mensagem como lida"""
+    message = Message.query.filter_by(id=message_id, chat_id=chat_id).first()
+    
+    if not message:
+        return jsonify({"status": "error", "message": "Mensagem não encontrada."}), 404
+    
+    message.is_read = True
+    db.session.commit()
+    
+    return jsonify({"status": "success", "message": "Mensagem marcada como lida."})
+
+@app.route("/api/chats/<int:chat_id>/messages/read-all", methods=["PUT"])
+def mark_all_messages_as_read(chat_id):
+    """Marca todas as mensagens de um chat como lidas para um usuário específico"""
+    data = request.get_json()
+    user_id = data.get("user_id")
+    
+    if not user_id:
+        return jsonify({"status": "error", "message": "user_id é obrigatório."}), 400
+    
+    chat = Chat.query.get(chat_id)
+    if not chat:
+        return jsonify({"status": "error", "message": "Chat não encontrado."}), 404
+    
+    # Marca como lidas todas as mensagens que não foram enviadas pelo usuário
+    messages = chat.messages.filter(Message.sender_id != user_id, Message.is_read == False).all()
+    
+    for msg in messages:
+        msg.is_read = True
+    
+    db.session.commit()
+    
+    return jsonify({"status": "success", "message": f"{len(messages)} mensagens marcadas como lidas."})
+
+# ==================== FIM DOS ENDPOINTS DE CHAT ====================
+
+# ==================== ENDPOINTS DO DASHBOARD ====================
+
+@app.route("/api/professionals/<string:professional_id>/metrics", methods=["GET"])
+def get_professional_metrics(professional_id):
+    """Retorna as métricas de desempenho de um profissional"""
+    professional = Professional.query.get(professional_id)
+    
+    if not professional:
+        return jsonify({"status": "error", "message": "Profissional não encontrado."}), 404
+    
+    metrics = ProfessionalMetrics.query.filter_by(professional_id=professional_id).first()
+    
+    if not metrics:
+        # Criar métricas padrão se não existirem
+        metrics = ProfessionalMetrics(professional_id=professional_id)
+        db.session.add(metrics)
+        db.session.commit()
+    
+    # Calcular taxa de conversão
+    if metrics.profile_views > 0:
+        total_contacts = metrics.whatsapp_clicks + metrics.chat_conversations
+        metrics.conversion_rate = (total_contacts / metrics.profile_views) * 100
+    
+    return jsonify({
+        "status": "success",
+        "metrics": {
+            "profile_views": metrics.profile_views,
+            "profile_views_this_month": metrics.profile_views_this_month,
+            "whatsapp_clicks": metrics.whatsapp_clicks,
+            "whatsapp_clicks_this_month": metrics.whatsapp_clicks_this_month,
+            "chat_conversations": metrics.chat_conversations,
+            "chat_conversations_this_month": metrics.chat_conversations_this_month,
+            "total_appointments": metrics.total_appointments,
+            "appointments_this_month": metrics.appointments_this_month,
+            "completed_appointments": metrics.completed_appointments,
+            "conversion_rate": round(metrics.conversion_rate, 2),
+            "last_updated": metrics.last_updated.isoformat()
+        }
+    })
+
+@app.route("/api/professionals/<string:professional_id>/dashboard", methods=["GET"])
+def get_professional_dashboard(professional_id):
+    """Retorna dados completos do dashboard do profissional"""
+    professional = Professional.query.get(professional_id)
+    
+    if not professional:
+        return jsonify({"status": "error", "message": "Profissional não encontrado."}), 404
+    
+    # Buscar métricas
+    metrics = ProfessionalMetrics.query.filter_by(professional_id=professional_id).first()
+    if not metrics:
+        metrics = ProfessionalMetrics(professional_id=professional_id)
+        db.session.add(metrics)
+        db.session.commit()
+    
+    # Buscar assinatura
+    subscription = Subscription.query.filter_by(professional_id=professional_id).first()
+    
+    # Buscar chats ativos
+    active_chats = Chat.query.filter_by(professional_id=professional_id).count()
+    
+    # Buscar agendamentos futuros
+    upcoming_schedules = Schedule.query.filter(
+        Schedule.professional_id == professional_id,
+        Schedule.start_time > datetime.utcnow(),
+        Schedule.status == 'BLOCKED'
+    ).order_by(Schedule.start_time).limit(5).all()
+    
+    schedules_data = []
+    for schedule in upcoming_schedules:
+        schedules_data.append({
+            "id": schedule.id,
+            "start_time": schedule.start_time.isoformat(),
+            "end_time": schedule.end_time.isoformat(),
+            "status": schedule.status
+        })
+    
+    # Calcular taxa de conversão
+    if metrics.profile_views > 0:
+        total_contacts = metrics.whatsapp_clicks + metrics.chat_conversations
+        conversion_rate = (total_contacts / metrics.profile_views) * 100
+    else:
+        conversion_rate = 0.0
+    
+    return jsonify({
+        "status": "success",
+        "dashboard": {
+            "professional": {
+                "id": professional.id,
+                "name": professional.name,
+                "profession": professional.profession,
+                "city": professional.city,
+                "state": professional.state,
+                "rating": professional.rating,
+                "reviews": professional.reviews
+            },
+            "subscription": {
+                "plan": subscription.plan if subscription else "Nenhum",
+                "status": subscription.status if subscription else "inactive",
+                "due_date": subscription.due_date.isoformat() if subscription and subscription.due_date else None
+            },
+            "metrics": {
+                "profile_views": metrics.profile_views,
+                "profile_views_this_month": metrics.profile_views_this_month,
+                "whatsapp_clicks": metrics.whatsapp_clicks,
+                "whatsapp_clicks_this_month": metrics.whatsapp_clicks_this_month,
+                "chat_conversations": metrics.chat_conversations,
+                "chat_conversations_this_month": metrics.chat_conversations_this_month,
+                "total_appointments": metrics.total_appointments,
+                "appointments_this_month": metrics.appointments_this_month,
+                "completed_appointments": metrics.completed_appointments,
+                "conversion_rate": round(conversion_rate, 2)
+            },
+            "active_chats": active_chats,
+            "upcoming_schedules": schedules_data
+        }
+    })
+
+@app.route("/api/professionals/<string:professional_id>/metrics/increment", methods=["POST"])
+def increment_metric(professional_id):
+    """Incrementa uma métrica específica do profissional"""
+    data = request.get_json()
+    metric_name = data.get("metric")
+    
+    if not metric_name:
+        return jsonify({"status": "error", "message": "O campo 'metric' é obrigatório."}), 400
+    
+    metrics = ProfessionalMetrics.query.filter_by(professional_id=professional_id).first()
+    
+    if not metrics:
+        metrics = ProfessionalMetrics(professional_id=professional_id)
+        db.session.add(metrics)
+    
+    # Incrementar a métrica especificada
+    valid_metrics = [
+        'profile_views', 'profile_views_this_month',
+        'whatsapp_clicks', 'whatsapp_clicks_this_month',
+        'chat_conversations', 'chat_conversations_this_month',
+        'total_appointments', 'appointments_this_month',
+        'completed_appointments'
+    ]
+    
+    if metric_name not in valid_metrics:
+        return jsonify({"status": "error", "message": f"Métrica '{metric_name}' inválida."}), 400
+    
+    current_value = getattr(metrics, metric_name)
+    setattr(metrics, metric_name, current_value + 1)
+    
+    db.session.commit()
+    
+    return jsonify({"status": "success", "message": f"Métrica '{metric_name}' incrementada com sucesso."})
+
+# ==================== FIM DOS ENDPOINTS DO DASHBOARD ====================
 
 def init_db():
     with app.app_context():
