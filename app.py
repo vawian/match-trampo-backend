@@ -167,6 +167,59 @@ def process_payment_api():
     except ValueError:
         return jsonify({"status": "error", "message": "Valor do pagamento inválido."}), 400
 
+# --- Endpoint de Busca e Ranqueamento (RF 2.3.2) ---
+
+@app.route('/api/search/professionals', methods=['GET'])
+def search_professionals():
+    """
+    Realiza a busca de profissionais com ranqueamento misto (Avaliação e Distância).
+    Parâmetros: profession (string), city (string, opcional), state (string, opcional).
+    """
+    profession_query = request.args.get('profession')
+    city_query = request.args.get('city')
+    state_query = request.args.get('state')
+    
+    if not profession_query:
+        return jsonify({"status": "error", "message": "O parâmetro 'profession' é obrigatório."}), 400
+
+    # 1. Filtra por profissão
+    # Usa ilike para busca case-insensitive
+    query = db.session.query(Professional, Subscription.plan).join(Subscription, Professional.id == Subscription.professional_id)
+    query = query.filter(Professional.profession.ilike(f'%{profession_query}%'))
+
+    # 2. Filtra por localização (se fornecida)
+    if city_query:
+        query = query.filter(Professional.city.ilike(f'%{city_query}%'))
+    if state_query:
+        query = query.filter(Professional.state.ilike(f'%{state_query}%'))
+
+    # 3. Ranqueamento Misto (RF 2.3.2): Prioriza Avaliação e Distância (Cidade/Estado)
+    # A ordenação de prioridade será: Master > Rating > Proximidade (implícita pelo filtro)
+    
+    # Recupera todos os profissionais filtrados
+    professionals_with_subscription = query.all()
+    
+    # Converte para um formato mais fácil de manipular e aplica a ordenação em Python
+    results = []
+    for professional, plan in professionals_with_subscription:
+        results.append({
+            "id": professional.id,
+            "name": professional.name,
+            "profession": professional.profession,
+            "city": professional.city,
+            "state": professional.state,
+            "rating": professional.rating,
+            "reviews": professional.reviews,
+            "plan": plan,
+            "is_master": plan == 'Master'
+        })
+        
+    # Ordenação Final (Python): Master (True) > Rating (Decrescente)
+    # O ranqueamento misto é aplicado aqui: Master (Prioridade) e Rating (Qualidade)
+    results.sort(key=lambda x: (x['is_master'], x['rating']), reverse=True)
+
+    return jsonify({"status": "success", "results": results})
+
 # --- Função de Inicialização do DB ---
 
 def init_db():
@@ -174,10 +227,12 @@ def init_db():
         db.create_all()
         
         # 1. Cria profissionais de teste
-        prof_123 = Professional(id='prof_123', name='João da Silva', profession='Eletricista', rating=4.8, reviews=154)
-        prof_789 = Professional(id='prof_789', name='Maria Souza', profession='Pintora', rating=4.9, reviews=88)
+        prof_123 = Professional(id='prof_123', name='João da Silva', profession='Eletricista', city='São Paulo', state='SP', rating=4.8, reviews=154)
+        prof_789 = Professional(id='prof_789', name='Maria Souza', profession='Pintora', city='São Paulo', state='SP', rating=4.9, reviews=88)
+        prof_456 = Professional(id='prof_456', name='Carlos Alberto', profession='Eletricista', city='Campinas', state='SP', rating=4.5, reviews=50)
+        prof_101 = Professional(id='prof_101', name='Fernanda Costa', profession='Pintora', city='Rio de Janeiro', state='RJ', rating=5.0, reviews=200)
         
-        db.session.add_all([prof_123, prof_789])
+        db.session.add_all([prof_123, prof_789, prof_456, prof_101])
         db.session.commit()
         
         # 2. Cria assinaturas de teste

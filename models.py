@@ -7,6 +7,8 @@ class Professional(db.Model):
     id = db.Column(db.String, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     profession = db.Column(db.String(100), nullable=False)
+    city = db.Column(db.String(100), nullable=False, default='São Paulo')
+    state = db.Column(db.String(2), nullable=False, default='SP')
     rating = db.Column(db.Float, default=0.0)
     reviews = db.Column(db.Integer, default=0)
     
