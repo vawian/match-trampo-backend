@@ -108,7 +108,10 @@ def get_chats():
             "professional_profession": chat.professional.profession,
             "last_message": last_message.content if last_message else None,
             "last_message_at": last_message.sent_at.isoformat() if last_message else chat.created_at.isoformat(),
-            "unread_count": unread_count
+            "unread_count": unread_count,
+            "client_latitude": chat.client_latitude,
+            "client_longitude": chat.client_longitude,
+            "client_address": chat.client_address
         })
     
     return jsonify({"status": "success", "chats": result})
@@ -142,6 +145,9 @@ def create_or_get_chat():
     data = request.get_json()
     client_id = data.get("client_id")
     professional_id = data.get("professional_id")
+    client_latitude = data.get("client_latitude")
+    client_longitude = data.get("client_longitude")
+    client_address = data.get("client_address")
     
     if not client_id or not professional_id:
         return jsonify({"status": "error", "message": "client_id e professional_id são obrigatórios."}), 400
@@ -150,10 +156,22 @@ def create_or_get_chat():
     existing_chat = Chat.query.filter_by(client_id=client_id, professional_id=professional_id).first()
     
     if existing_chat:
+        # Atualizar localização se fornecida
+        if client_latitude is not None and client_longitude is not None:
+            existing_chat.client_latitude = client_latitude
+            existing_chat.client_longitude = client_longitude
+            existing_chat.client_address = client_address
+            db.session.commit()
         return jsonify({"status": "success", "chat_id": existing_chat.id, "created": False})
     
     # Cria um novo chat
-    new_chat = Chat(client_id=client_id, professional_id=professional_id)
+    new_chat = Chat(
+        client_id=client_id,
+        professional_id=professional_id,
+        client_latitude=client_latitude,
+        client_longitude=client_longitude,
+        client_address=client_address
+    )
     db.session.add(new_chat)
     db.session.commit()
     

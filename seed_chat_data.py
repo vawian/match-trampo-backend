@@ -12,26 +12,35 @@ def seed_chat_data():
         Chat.query.delete()
         db.session.commit()
         
-        # Criar chats de teste
+        # Criar chats de teste com localização
         chat1 = Chat(
             client_id="client_001",
             professional_id="prof_123",
             created_at=datetime.utcnow() - timedelta(days=2),
-            last_message_at=datetime.utcnow() - timedelta(hours=1)
+            last_message_at=datetime.utcnow() - timedelta(hours=1),
+            client_latitude=-23.5629,  # Região da Av. Paulista, São Paulo
+            client_longitude=-46.6544,
+            client_address="Av. Paulista, 1578 - Bela Vista, São Paulo - SP"
         )
         
         chat2 = Chat(
             client_id="client_001",
             professional_id="prof_789",
             created_at=datetime.utcnow() - timedelta(days=1),
-            last_message_at=datetime.utcnow() - timedelta(minutes=30)
+            last_message_at=datetime.utcnow() - timedelta(minutes=30),
+            client_latitude=-23.5475,  # Região do Parque Ibirapuera, São Paulo
+            client_longitude=-46.6361,
+            client_address="Av. Pedro Álvares Cabral - Vila Mariana, São Paulo - SP"
         )
         
         chat3 = Chat(
             client_id="client_001",
             professional_id="prof_202",
             created_at=datetime.utcnow() - timedelta(hours=5),
-            last_message_at=datetime.utcnow() - timedelta(minutes=5)
+            last_message_at=datetime.utcnow() - timedelta(minutes=5),
+            client_latitude=-23.5489,  # Região da Liberdade, São Paulo
+            client_longitude=-46.6388,
+            client_address="Rua Galvão Bueno, 209 - Liberdade, São Paulo - SP"
         )
         
         db.session.add_all([chat1, chat2, chat3])
@@ -131,7 +140,7 @@ def seed_chat_data():
                 chat_id=chat3.id,
                 sender_id="client_001",
                 sender_type="client",
-                content="Rua das Flores, 123 - Jardim Paulista",
+                content="Rua Galvão Bueno, 209 - Liberdade",
                 sent_at=datetime.utcnow() - timedelta(hours=4, minutes=45),
                 is_read=True
             ),
@@ -167,6 +176,7 @@ def seed_chat_data():
         print("✅ Dados de chat populados com sucesso!")
         print(f"   - {len([chat1, chat2, chat3])} chats criados")
         print(f"   - {len(messages_chat1 + messages_chat2 + messages_chat3)} mensagens criadas")
+        print("   - Todos os chats incluem localização do cliente")
 
 if __name__ == "__main__":
     seed_chat_data()

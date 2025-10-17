@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime, date
 
 db = SQLAlchemy()
 
@@ -8,7 +8,7 @@ class Professional(db.Model):
     name = db.Column(db.String(100), nullable=False)
     profession = db.Column(db.String(100), nullable=False)
     city = db.Column(db.String(100), nullable=False, default='São Paulo')
-    state = db.Column(db.String(2), nullable=False, default='SP')
+    state = db.Column(db.String(50), nullable=False)
     rating = db.Column(db.Float, default=0.0)
     reviews = db.Column(db.Integer, default=0)
     latitude = db.Column(db.Float, nullable=True)
@@ -48,6 +48,11 @@ class Chat(db.Model):
     professional_id = db.Column(db.String, db.ForeignKey('professional.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_message_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Localização do cliente
+    client_latitude = db.Column(db.Float, nullable=True)
+    client_longitude = db.Column(db.Float, nullable=True)
+    client_address = db.Column(db.String(255), nullable=True)  # Endereço formatado
     
     # Relacionamentos
     messages = db.relationship('Message', backref='chat', lazy='dynamic', cascade="all, delete-orphan", order_by="Message.sent_at")
@@ -97,4 +102,3 @@ class ProfessionalMetrics(db.Model):
 
     def __repr__(self):
         return f'<ProfessionalMetrics {self.professional_id}>'
-
