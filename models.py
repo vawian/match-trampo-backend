@@ -11,6 +11,8 @@ class Professional(db.Model):
     state = db.Column(db.String(2), nullable=False, default='SP')
     rating = db.Column(db.Float, default=0.0)
     reviews = db.Column(db.Integer, default=0)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
     
     # Relacionamentos
     subscription = db.relationship('Subscription', backref='professional', uselist=False, cascade="all, delete-orphan")
